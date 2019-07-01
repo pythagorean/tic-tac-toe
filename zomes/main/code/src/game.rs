@@ -1,21 +1,14 @@
-use std::convert::TryFrom;
 use hdk::{
-    utils,
     entry_definition::ValidatingEntryType,
-    error::{ZomeApiResult, ZomeApiError},
-    holochain_persistence_api::{
-        cas::content::{AddressableContent, Address},
-    },
-    holochain_json_api::{
-        error::JsonError, json::JsonString,
-    },
+    error::{ZomeApiError, ZomeApiResult},
     holochain_core_types::{
-        dna::entry_types::Sharing,
-        validation::EntryValidationData,
-        entry::Entry,
-        link::LinkMatch,
-    }
+        dna::entry_types::Sharing, entry::Entry, link::LinkMatch, validation::EntryValidationData,
+    },
+    holochain_json_api::{error::JsonError, json::JsonString},
+    holochain_persistence_api::cas::content::{Address, AddressableContent},
+    utils,
 };
+use std::convert::TryFrom;
 
 use crate::game_move::Move;
 use crate::GameState;
@@ -33,41 +26,57 @@ pub struct Game {
 
 /// Traverse the linked list rooted at a game to find all the moves
 pub fn get_moves(game_address: &Address) -> ZomeApiResult<Vec<Move>> {
-    match hdk::get_links(game_address, LinkMatch::Any, LinkMatch::Any)?.addresses().into_iter().next() {
+    match hdk::get_links(game_address, LinkMatch::Any, LinkMatch::Any)?
+        .addresses()
+        .into_iter()
+        .next()
+    {
         Some(first_move) => {
             let mut move_addresses = vec![first_move];
             let mut more = true;
             while more {
-                more = match hdk::get_links(move_addresses.last().unwrap(), LinkMatch::Any, LinkMatch::Any)?.addresses().into_iter().next() {
+                more = match hdk::get_links(
+                    move_addresses.last().unwrap(),
+                    LinkMatch::Any,
+                    LinkMatch::Any,
+                )?
+                .addresses()
+                .into_iter()
+                .next()
+                {
                     Some(addr) => {
                         move_addresses.push(addr.clone());
                         true
-                    },
-                    None => {
-                        false
-                    },
+                    }
+                    None => false,
                 }
             }
-            let moves: Vec<Move> = move_addresses.iter().map(|addr| {
-                let move_entry = hdk::get_entry(addr).unwrap().unwrap();
-                if let Entry::App(_, move_struct) = move_entry {
-                    Move::try_from(move_struct).expect("Entry at address is type other than Move")
-                } else {
-                    panic!("Not an app entry!")
-                }
-            }).collect();
+            let moves: Vec<Move> = move_addresses
+                .iter()
+                .map(|addr| {
+                    let move_entry = hdk::get_entry(addr).unwrap().unwrap();
+                    if let Entry::App(_, move_struct) = move_entry {
+                        Move::try_from(move_struct)
+                            .expect("Entry at address is type other than Move")
+                    } else {
+                        panic!("Not an app entry!")
+                    }
+                })
+                .collect();
             Ok(moves)
-        },
-        None => {
-            Ok(Vec::new())
         }
+        None => Ok(Vec::new()),
     }
 }
 
 pub fn get_state(game_address: &Address) -> ZomeApiResult<GameState> {
     let moves = get_moves(game_address)?;
     let game = get_game(game_address)?;
-    let new_state = moves.iter().fold(GameState::initial(), |state, new_move| state.evolve(game.clone(), new_move));
+    let mut num_moves = moves.len();
+    let new_state = moves.iter().fold(GameState::initial(), |state, new_move| {
+        num_moves -= 1;
+        state.evolve(game.clone(), new_move, num_moves == 0)
+    });
     Ok(new_state)
 }
 
@@ -77,18 +86,17 @@ pub fn get_game(game_address: &Address) -> ZomeApiResult<Game> {
 
 /*=====  End of DHT Functions  ======*/
 
-
-
 /*=============================================
 =            Local chain functions            =
 =============================================*/
 
-pub fn get_game_local_chain(local_chain: Vec<Entry>, game_address: &Address) -> ZomeApiResult<Game> {
+pub fn get_game_local_chain(
+    local_chain: Vec<Entry>,
+    game_address: &Address,
+) -> ZomeApiResult<Game> {
     local_chain
         .iter()
-        .filter(|entry| {
-            entry.address() == game_address.to_owned()
-        })
+        .filter(|entry| entry.address() == game_address.to_owned())
         .filter_map(|entry| {
             if let Entry::App(_, entry_data) = entry {
                 Some(Game::try_from(entry_data.clone()).unwrap())
@@ -100,7 +108,10 @@ pub fn get_game_local_chain(local_chain: Vec<Entry>, game_address: &Address) -> 
         .ok_or(ZomeApiError::HashNotFound)
 }
 
-pub fn get_moves_local_chain(local_chain: Vec<Entry>, game_address: &Address) -> ZomeApiResult<Vec<Move>> {
+pub fn get_moves_local_chain(
+    local_chain: Vec<Entry>,
+    game_address: &Address,
+) -> ZomeApiResult<Vec<Move>> {
     Ok(local_chain
         .iter()
         .filter_map(|entry| {
@@ -114,25 +125,28 @@ pub fn get_moves_local_chain(local_chain: Vec<Entry>, game_address: &Address) ->
                 None
             }
         })
-        .filter(|game_move| {
-            game_move.game == game_address.to_owned()
-        })
+        .filter(|game_move| game_move.game == game_address.to_owned())
         .rev()
         .collect())
 }
 
-pub fn get_state_local_chain(local_chain: Vec<Entry>, game_address: &Address) -> ZomeApiResult<GameState> {
+pub fn get_state_local_chain(
+    local_chain: Vec<Entry>,
+    game_address: &Address,
+) -> ZomeApiResult<GameState> {
     let moves = get_moves_local_chain(local_chain.clone(), game_address)?;
     let game = get_game_local_chain(local_chain, game_address)?;
-    let new_state = moves.iter().fold(GameState::initial(), move |state, new_move| state.evolve(game.clone(), new_move));
+    let mut num_moves = moves.len();
+    let new_state = moves
+        .iter()
+        .fold(GameState::initial(), move |state, new_move| {
+            num_moves -= 1;
+            state.evolve(game.clone(), new_move, num_moves == 0)
+        });
     Ok(new_state)
 }
 
-
 /*=====  End of Local chain functions  ======*/
-
-
-
 
 pub fn definition() -> ValidatingEntryType {
     entry!(

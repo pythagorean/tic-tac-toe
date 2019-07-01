@@ -12,25 +12,15 @@ extern crate hdk_proc_macros;
 use hdk_proc_macros::zome;
 
 use hdk::{
+    entry_definition::ValidatingEntryType, error::ZomeApiResult,
+    holochain_core_types::entry::Entry, holochain_persistence_api::cas::content::Address,
     AGENT_ADDRESS,
-    entry_definition::ValidatingEntryType,
-    error::ZomeApiResult,
-    holochain_persistence_api::{
-        cas::content::{Address},
-    },
-    holochain_core_types::{
-        entry::Entry,
-    },
 };
 
 // This is where you would import your own game State, MoveType and state_reducer
 
 mod your_game;
-pub use your_game::{
-    GameState,
-    MoveType,
-};
-
+pub use your_game::{GameState, MoveType};
 
 mod game;
 mod game_move;
@@ -74,7 +64,6 @@ pub mod main {
 
     /*=====  End of Entry Definitions  ======*/
 
-
     /*======================================
     =            Zome functions            =
     ======================================*/
@@ -86,10 +75,7 @@ pub mod main {
             player_2: opponent,
             created_at: timestamp,
         };
-        let game_entry = Entry::App(
-            "game".into(),
-            new_game.into(),
-        );
+        let game_entry = Entry::App("game".into(), new_game.into());
         hdk::commit_entry(&game_entry)
     }
 
@@ -104,7 +90,8 @@ pub mod main {
                 let new_move_entry = Entry::App("move".into(), last_move.into());
                 hdk::commit_entry(&new_move_entry)?
             }
-            None => { // no moves have been made so commit the Game
+            None => {
+                // no moves have been made so commit the Game
                 let game = game::get_game(&new_move.game)?;
                 let game_entry = Entry::App("game".into(), game.into());
                 hdk::commit_entry(&game_entry)?
@@ -118,10 +105,7 @@ pub mod main {
             previous_move: base_address.clone(),
             timestamp: new_move.timestamp,
         };
-        let move_entry = Entry::App(
-            "move".into(),
-            new_move.into(),
-        );
+        let move_entry = Entry::App("move".into(), new_move.into());
         let move_address = hdk::commit_entry(&move_entry)?;
         hdk::link_entries(&base_address, &move_address, "", "")?;
         Ok(())
@@ -146,7 +130,6 @@ pub mod main {
     fn whoami() -> ZomeApiResult<Address> {
         Ok(AGENT_ADDRESS.to_string().into())
     }
-
 
     #[zome_fn("hc_public")]
     fn create_proposal(message: String) -> ZomeApiResult<Address> {
