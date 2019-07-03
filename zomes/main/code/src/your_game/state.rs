@@ -24,6 +24,7 @@ pub struct GameState {
     pub player_1_pieces: Vec<Piece>,
     pub player_2_pieces: Vec<Piece>,
     pub winner: Option<Address>,
+    pub game_over: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultJson, PartialEq)]
@@ -72,6 +73,7 @@ impl GameState {
             player_1_pieces: vec![Piece { x: 4, y: 3 }, Piece { x: 3, y: 4 }],
             player_2_pieces: vec![Piece { x: 3, y: 3 }, Piece { x: 4, y: 4 }],
             winner: None,
+            game_over: false,
         }
     }
 
@@ -99,6 +101,7 @@ impl GameState {
         let mut player_1_pieces = self.player_1_pieces.clone();
         let mut player_2_pieces = self.player_2_pieces.clone();
         let mut winner = self.winner.clone();
+        let mut game_over = self.game_over.clone();
 
         moves.push(next_move.clone());
 
@@ -134,15 +137,22 @@ impl GameState {
             MoveType::Pass => {
                 if let Some(last_move) = moves.last() {
                     if last_move.move_type == MoveType::Pass {
-                        // Calculate winner
+                        if player_1_pieces.len() > player_2_pieces.len() {
+                            winner = Some(game.player_1);
+                        } else if player_2_pieces.len() > player_1_pieces.len() {
+                            winner = Some(game.player_2);
+                        }
+                        game_over = true;
                     }
                 }
             }
             MoveType::Resign => {
                 if game.player_1 == next_move.author {
-                    winner = Some(game.player_2)
+                    winner = Some(game.player_2);
+                    game_over = true;
                 } else {
-                    winner = Some(game.player_1)
+                    winner = Some(game.player_1);
+                    game_over = true;
                 }
             }
         }
@@ -152,6 +162,7 @@ impl GameState {
             player_1_pieces,
             player_2_pieces,
             winner,
+            game_over,
         }
     }
 }

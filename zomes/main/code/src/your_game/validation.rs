@@ -21,10 +21,10 @@ impl Move {
         is_players_turn(self.author.clone(), &game, &game_state)?;
         match self.move_type {
             MoveType::Place { x, y } => {
-                let piece = Piece { x, y };
-                piece.is_in_bounds()?;
-                piece.is_empty(&game_state)?;
-                piece.can_capture(&game, &game_state)?;
+                let position = Piece { x, y };
+                position.is_in_bounds()?;
+                position.is_empty(&game_state)?;
+                position.can_capture(&game, &game_state)?;
                 Ok(())
             }
             MoveType::Pass => Ok(()),
@@ -34,7 +34,7 @@ impl Move {
 }
 
 fn is_players_turn(player: Address, game: &Game, game_state: &GameState) -> Result<(), String> {
-    if game_state.winner.is_some() {
+    if game_state.game_over {
         return Err("This game has ended".into());
     }
 
