@@ -3,10 +3,10 @@ use hdk::{
     holochain_persistence_api::cas::content::Address,
     AGENT_ADDRESS,
 };
+use std::cmp::{max, min};
 
 use super::MoveType;
-use crate::game::Game;
-use crate::game_move::Move;
+use crate::{game::Game, game_move::Move};
 
 /**
  *
@@ -32,7 +32,7 @@ pub struct Piece {
     pub y: usize,
 }
 
-const BOARD_SIZE: usize = 3;
+const BOARD_SIZE: usize = 8;
 
 impl Piece {
     pub fn is_in_bounds(&self) -> Result<(), String> {
@@ -50,14 +50,27 @@ impl Piece {
             Ok(())
         }
     }
+
+    pub fn can_capture(&self, game: &Game, game_state: &GameState) -> Result<(), String> {
+        let player_num = if AGENT_ADDRESS.to_string() == game.player_1.to_string() {
+            1
+        } else {
+            2
+        };
+        if !Board::set(game_state).can_capture(self.x, self.y, player_num) {
+            Err("No opponent pieces can be flipped from this location".into())
+        } else {
+            Ok(())
+        }
+    }
 }
 
 impl GameState {
     pub fn initial() -> Self {
         Self {
             moves: Vec::new(),
-            player_1_pieces: Vec::new(),
-            player_2_pieces: Vec::new(),
+            player_1_pieces: vec![Piece { x: 4, y: 3 }, Piece { x: 3, y: 4 }],
+            player_2_pieces: vec![Piece { x: 3, y: 3 }, Piece { x: 4, y: 4 }],
             winner: None,
         }
     }
@@ -94,13 +107,34 @@ impl GameState {
                 // figure out which player made the move
                 if game.player_1 == next_move.author {
                     player_1_pieces.push(Piece { x, y });
-                    if is_last_move && Board::set(self).wins(x, y, 1) {
-                        winner = Some(game.player_1);
+                    if is_last_move {
+                        let captured = Board::set(self).do_capture(x, y, 1);
+                        player_2_pieces = player_2_pieces
+                            .into_iter()
+                            .filter(|piece| !captured.contains(piece))
+                            .collect();
+                        captured
+                            .into_iter()
+                            .for_each(|piece| player_1_pieces.push(piece));
                     }
                 } else {
                     player_2_pieces.push(Piece { x, y });
-                    if is_last_move && Board::set(self).wins(x, y, 2) {
-                        winner = Some(game.player_2);
+                    if is_last_move {
+                        let captured = Board::set(self).do_capture(x, y, 2);
+                        player_1_pieces = player_1_pieces
+                            .into_iter()
+                            .filter(|piece| !captured.contains(piece))
+                            .collect();
+                        captured
+                            .into_iter()
+                            .for_each(|piece| player_2_pieces.push(piece));
+                    }
+                }
+            }
+            MoveType::Pass => {
+                if let Some(last_move) = moves.last() {
+                    if last_move.move_type == MoveType::Pass {
+                        // Calculate winner
                     }
                 }
             }
@@ -127,44 +161,160 @@ struct Board([[u8; BOARD_SIZE]; BOARD_SIZE]);
 impl Board {
     fn set(game_state: &GameState) -> Self {
         let mut board = [[0u8; BOARD_SIZE]; BOARD_SIZE];
-        game_state.player_1_pieces
+        game_state
+            .player_1_pieces
             .iter()
             .for_each(|Piece { x, y }| board[*y][*x] = 1);
-        game_state.player_2_pieces
+        game_state
+            .player_2_pieces
             .iter()
             .for_each(|Piece { x, y }| board[*y][*x] = 2);
         Self(board)
     }
 
-    fn wins(&mut self, x: usize, y: usize, val: u8) -> bool {
-        // set the potential win position
-        self.0[y][x] = val;
-        // look for horizontal win
-        if self.0[y].iter().all(|&x| x == val) {
-            return true;
+    fn can_capture(&self, x: usize, y: usize, player: u8) -> bool {
+        self.may_capture(x,y,player,false).1
+    }
+
+    fn do_capture(&mut self, x: usize, y: usize, player: u8) -> Vec<Piece> {
+        self.may_capture(x,y,player,true).0
+    }
+
+    fn may_capture(&self, x: usize, y: usize, player: u8, do_capture: bool) -> (Vec<Piece>, bool) {
+        let board = &self.0;
+        let opponent = 3 - player;
+        let mut flipped: Vec<Piece> = Vec::new();
+        // horizontal forward
+        if x + 2 < BOARD_SIZE && board[y][x + 1] == opponent {
+            let mut iter = board[y][x + 2..BOARD_SIZE]
+                .iter()
+                .skip_while(|&&o| o == opponent)
+                .enumerate();
+            if let Some((n, &p)) = iter.next() {
+                if p == player {
+                    if do_capture {
+                        (x + 1..x + n + 2).for_each(|x| flipped.push(Piece { x, y }));
+                    } else {
+                        return (flipped, true);
+                    }
+                }
+            }
         }
-        // look for vertical win
-        if self.0.iter().all(|&y| y[x] == val) {
-            return true;
+        // horizontal backward
+        if x >= 2 && board[y][x - 1] == opponent {
+            let mut iter = board[y][0..x - 1]
+                .iter()
+                .rev()
+                .skip_while(|&&x| x == opponent)
+                .enumerate();
+            if let Some((n, &p)) = iter.next() {
+                if p == player {
+                    if do_capture {
+                        (x - n - 2..x - 1).for_each(|x| flipped.push(Piece { x, y }));
+                    } else {
+                        return (flipped, true);
+                    }
+                }
+            }
         }
-        // look for main diagonal win
-        if x == y && (0..BOARD_SIZE).all(|x| self.0[x][x] == val) {
-            return true;
+        // vertical downward
+        if y + 2 < BOARD_SIZE && board[y + 1][x] == opponent {
+            let mut iter = board[y + 2..BOARD_SIZE]
+                .iter()
+                .skip_while(|&&y| y[x] == opponent)
+                .enumerate();
+            if let Some((n, &p)) = iter.next() {
+                if p[x] == player {
+                    if do_capture {
+                        (y + 1..y + n + 2).for_each(|y| flipped.push(Piece { x, y }));
+                    } else {
+                        return (flipped, true);
+                    }
+                }
+            }
         }
-        // look for anti diagonal win
-        if x + y + 1 == BOARD_SIZE
-            && (0..BOARD_SIZE).all(|x| {
-                let y = BOARD_SIZE - x - 1;
-                self.0[y][x] == val
-            })
-        {
-            return true;
+        // vertical upward
+        if y >= 2 && board[y - 1][x] == opponent {
+            let mut iter = board[0..y - 1]
+                .iter()
+                .rev()
+                .skip_while(|&&y| y[x] == opponent)
+                .enumerate();
+            if let Some((n, &p)) = iter.next() {
+                if p[x] == player {
+                    if do_capture {
+                        (y - n - 2..y - 1).for_each(|y| flipped.push(Piece { x, y }));
+                    } else {
+                        return (flipped, true);
+                    }
+                }
+            }
         }
-        false
+        // downward diagonal forward
+        if max(x, y) + 2 < BOARD_SIZE && board[y + 1][x + 1] == opponent {
+            let mut iter = (2..BOARD_SIZE - max(x, y))
+                .skip_while(|&d| board[y + d][x + d] == opponent)
+                .enumerate();
+            if let Some((n, d)) = iter.next() {
+                if board[y + d][x + d] == player {
+                    if do_capture {
+                        (1..n + 1).for_each(|d| flipped.push(Piece { x: x + d, y: y + d }));
+                    } else {
+                        return (flipped, true);
+                    }
+                }
+            }
+        }
+        // downward diagonal backward
+        if min(x, y) >= 2 && board[y - 1][x - 1] == opponent {
+            let mut iter = (2..min(x, y))
+                .skip_while(|&d| board[y - d][x - d] == opponent)
+                .enumerate();
+            if let Some((n, d)) = iter.next() {
+                if board[y - d][x - d] == player {
+                    if do_capture {
+                        (1..n + 1).for_each(|d| flipped.push(Piece { x: x - d, y: y - d }));
+                    } else {
+                        return (flipped, true);
+                    }
+                }
+            }
+        }
+        // upward diagonal forward
+        if x + 2 < BOARD_SIZE && y >= 2 && board[y - 1][x + 1] == opponent {
+            let mut iter = (2..min(BOARD_SIZE - x, y))
+                .skip_while(|&d| board[y - d][x + d] == opponent)
+                .enumerate();
+            if let Some((n, d)) = iter.next() {
+                if board[y - d][x + d] == player {
+                    if do_capture {
+                        (1..n + 1).for_each(|d| flipped.push(Piece { x: x + d, y: y - d }));
+                    } else {
+                        return (flipped, true);
+                    }
+                }
+            }
+        }
+        // upward diagonal backward
+        if x >= 2 && y + 2 < BOARD_SIZE && board[y + 1][x - 1] == opponent {
+            let mut iter = (2..min(x, BOARD_SIZE - y))
+                .skip_while(|&d| board[y + d][x - d] == opponent)
+                .enumerate();
+            if let Some((n, d)) = iter.next() {
+                if board[y + d][x - d] == player {
+                    if do_capture {
+                        (1..n + 1).for_each(|d| flipped.push(Piece { x: x - d, y: y + d }));
+                    } else {
+                        return (flipped, true);
+                    }
+                }
+            }
+        }
+        (flipped, false)
     }
 
     fn render(&self) -> String {
-        let mut lines = "  x  0 1 2\ny\n".to_string();
+        let mut lines = "  x  0 1 2 3 4 5 6 7\ny\n".to_string();
         for (row, &y) in self.0.iter().enumerate() {
             lines.push_str(&format!("{}   ", row));
             for &x in y.iter() {

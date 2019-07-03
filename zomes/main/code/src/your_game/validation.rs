@@ -21,11 +21,13 @@ impl Move {
         is_players_turn(self.author.clone(), &game, &game_state)?;
         match self.move_type {
             MoveType::Place { x, y } => {
-                let pos = Piece { x, y };
-                pos.is_in_bounds()?;
-                pos.is_empty(&game_state)?;
+                let piece = Piece { x, y };
+                piece.is_in_bounds()?;
+                piece.is_empty(&game_state)?;
+                piece.can_capture(&game, &game_state)?;
                 Ok(())
             }
+            MoveType::Pass => Ok(()),
             MoveType::Resign => Ok(()),
         }
     }

@@ -10,6 +10,7 @@ use hdk::holochain_json_api::{error::JsonError, json::JsonString};
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultJson, PartialEq)]
 pub enum MoveType {
     Place { x: usize, y: usize },
+    Pass,
     Resign,
 }
 
