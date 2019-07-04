@@ -184,11 +184,11 @@ impl Board {
     }
 
     fn can_capture(&self, x: usize, y: usize, player: u8) -> bool {
-        self.may_capture(x,y,player,false).1
+        self.may_capture(x, y, player, false).1
     }
 
     fn do_capture(&mut self, x: usize, y: usize, player: u8) -> Vec<Piece> {
-        self.may_capture(x,y,player,true).0
+        self.may_capture(x, y, player, true).0
     }
 
     fn may_capture(&self, x: usize, y: usize, player: u8, do_capture: bool) -> (Vec<Piece>, bool) {
